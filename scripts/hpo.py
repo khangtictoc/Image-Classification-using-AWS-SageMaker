@@ -13,6 +13,13 @@ import torchvision.transforms as transforms
 import argparse
 import os
 import time
+import logging
+import sys
+
+# Set up loggers
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+logger.addHandler(logging.StreamHandler(sys.stdout))
 
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -30,6 +37,7 @@ def test(model, test_loader, criterion, device):
     print("# Testing Model on Whole Testing Dataset #")
     print("##########################################")
 
+    model.to(device)
     model.eval()
     running_loss = 0
     running_corrects = 0
@@ -45,7 +53,14 @@ def test(model, test_loader, criterion, device):
 
     total_loss = running_loss / len(test_loader.dataset)
     total_acc = running_corrects / len(test_loader.dataset)
-    print(f"Testing Accuracy: {100 * total_acc}, Testing Loss: {total_loss}")
+    print("Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+        loss.item(), running_corrects, len(test_loader.dataset), 100.0 * total_acc
+    ))
+    logger.info(
+        "Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+            loss.item(), running_corrects, len(test_loader.dataset), 100.0 * total_acc
+        )
+    )
 
 
 def train(model, train_loader, validation_loader, epochs, criterion, optimizer, device):
@@ -62,6 +77,7 @@ def train(model, train_loader, validation_loader, epochs, criterion, optimizer, 
     best_loss = 1e6
     loss_counter = 0
     image_dataset={'train': train_loader, 'valid': validation_loader}
+    model.to(device)
 
     for epoch in range(epochs):
         for phase in ['train', 'valid']:
