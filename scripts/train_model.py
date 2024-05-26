@@ -3,41 +3,44 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-import torchvision
+
 from torchvision.models import ResNet50_Weights
 from torchvision import datasets
 import torchvision.models as models
 import torchvision.transforms as transforms
 
 # Debugger & Profiler
-import smdebug.pytorch as smd
-from smdebug.profiler.utils import str2bool
+# import smdebug.pytorch as smd
+# from smdebug.profiler.utils import str2bool
 
 
 import argparse
 import os
 import time
-import logging
-import sys
 
 # Prevent truncated images error when resizing caused py PIL library (called by torchvision)
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+import logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
 NUM_OUTPUT_LABELS = 133
 MODEL_FOLDER_PATH = "./model"
 
-def test(model, test_loader, criterion, device, hook):
+def test(model, test_loader, criterion, device, hook=None):
     '''
         Complete this function that can take a model and a
         testing data loader and will get the test accuray/loss of the model
         Remember to include any debugging/profiling hooks that you might need
     '''
+    logger.info("TRAINGING PHASE")
     print("##########################################")
     print("# Testing Model on Whole Testing Dataset #")
     print("##########################################")
 
-    hook.set_mode(smd.modes.EVAL)
+    #hook.set_mode(smd.modes.EVAL)
 
     model.to(device)
     model.eval()
@@ -55,18 +58,22 @@ def test(model, test_loader, criterion, device, hook):
 
     total_loss = running_loss / len(test_loader.dataset)
     total_acc = running_corrects / len(test_loader.dataset)
+
+    logger.info("Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+        loss.item(), running_corrects, len(test_loader.dataset), 100.0 * total_acc
+    ))
     print("Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
         loss.item(), running_corrects, len(test_loader.dataset), 100.0 * total_acc
     ))
 
 
-def train(model, train_loader, validation_loader, epochs, criterion, optimizer, device, hook):
+def train(model, train_loader, validation_loader, epochs, criterion, optimizer, device, hook=None):
     '''
         Complete this function that can take a model and
         data loaders for training and will get train the model
         Remember to include any debugging/profiling hooks that you might need
     '''
-
+    logger.info("TRAINGING PHASE")
     print("##################################################")
     print("# Training Model on train and validation Dataset #")
     print("##################################################")
@@ -81,10 +88,10 @@ def train(model, train_loader, validation_loader, epochs, criterion, optimizer, 
             print(f"Epoch {epoch}, Phase {phase}")
 
             if phase == 'train':
-                hook.set_mode(smd.modes.TRAIN)
+                #hook.set_mode(smd.modes.TRAIN)
                 model.train()
             else:
-                hook.set_mode(smd.modes.EVAL)
+                #hook.set_mode(smd.modes.EVAL)
                 model.eval()
 
             running_loss = 0.0
@@ -143,6 +150,8 @@ def net():
     '''
         Use RESNET50 pretrained model
     '''
+    logger.info('Resnet50 Pretrained Model')
+
     model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
     # Freeze Model Parameters. This means we don't need to
     # update the pretrained parameters
@@ -165,6 +174,8 @@ def create_data_loaders(data_path, batch_size):
     return data_loader
 
 def save_model(model, output_path):
+    logger.info("Saving the model")
+    
     if not os.path.exists(output_path):
         os.makedirs(output_path)
     model_path = os.path.join(output_path, "resnet50"+".pth")
@@ -191,7 +202,7 @@ def get_args():
     )
 
     # Profiler -If True, the script will run on GPU
-    parser.add_argument("--gpu", type=str2bool, default=True)
+    #parser.add_argument("--gpu", type=str2bool, default=True)
 
     # Pass channel data as arguments (train, validation, test)
     parser.add_argument('--train', type=str, default=os.environ['SM_CHANNEL_TRAINING'])
@@ -218,9 +229,9 @@ def main():
     optimizer = optim.Adam(model.parameters(), args.lr)
 
     # Debugger - Create Hook for capture tensors
-    hook = smd.Hook.create_from_json_file()
-    hook.register_hook(model)
-    hook.register_loss(loss_criterion)
+    # hook = smd.Hook.create_from_json_file()
+    # hook.register_hook(model)
+    # hook.register_loss(loss_criterion)
 
     # Determine if we should use the CUDA GPU
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -234,13 +245,15 @@ def main():
         loss_criterion,
         optimizer,
         device,
-        hook)
+        #hook
+    )
 
     # Save the trained model
     save_model(model, MODEL_FOLDER_PATH)
 
     # Test the model to see its accuracy
-    test(model, test_loader, loss_criterion, device, hook)
+    test(model, test_loader, loss_criterion, device, #hook
+         )
 
 
 if __name__=='__main__':
