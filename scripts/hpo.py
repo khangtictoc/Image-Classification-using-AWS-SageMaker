@@ -3,8 +3,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-import torchvision
-from torchvision.models import ResNet50_Weights
+
+#from torchvision.models import ResNet50_Weights
 from torchvision import datasets
 import torchvision.models as models
 import torchvision.transforms as transforms
@@ -13,16 +13,14 @@ import torchvision.transforms as transforms
 import argparse
 import os
 import time
-import logging
-import sys
 
-# Set up loggers
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-logger.addHandler(logging.StreamHandler(sys.stdout))
-
+# Prevent truncated images error when resizing caused py PIL library (called by torchvision)
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+import logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 NUM_OUTPUT_LABELS = 133
 MODEL_FOLDER_PATH = "./model"
@@ -33,9 +31,12 @@ def test(model, test_loader, criterion, device):
         testing data loader and will get the test accuray/loss of the model
         Remember to include any debugging/profiling hooks that you might need
     '''
+    logger.info("TRAINGING PHASE")
     print("##########################################")
     print("# Testing Model on Whole Testing Dataset #")
     print("##########################################")
+
+    #hook.set_mode(smd.modes.EVAL)
 
     model.to(device)
     model.eval()
@@ -53,14 +54,14 @@ def test(model, test_loader, criterion, device):
 
     total_loss = running_loss / len(test_loader.dataset)
     total_acc = running_corrects / len(test_loader.dataset)
+
+    logger.info("Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+        loss.item(), running_corrects, len(test_loader.dataset), 100.0 * total_acc
+    ))
     print("Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
         loss.item(), running_corrects, len(test_loader.dataset), 100.0 * total_acc
     ))
-    logger.info(
-        "Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
-            loss.item(), running_corrects, len(test_loader.dataset), 100.0 * total_acc
-        )
-    )
+    print("Testing Total Loss: {:.3f}, Testing Accuracy: {:.3f}%".format(total_loss, 100*total_acc))
 
 
 def train(model, train_loader, validation_loader, epochs, criterion, optimizer, device):
@@ -69,7 +70,7 @@ def train(model, train_loader, validation_loader, epochs, criterion, optimizer, 
         data loaders for training and will get train the model
         Remember to include any debugging/profiling hooks that you might need
     '''
-
+    logger.info("TRAINGING PHASE")
     print("##################################################")
     print("# Training Model on train and validation Dataset #")
     print("##################################################")
@@ -82,6 +83,7 @@ def train(model, train_loader, validation_loader, epochs, criterion, optimizer, 
     for epoch in range(epochs):
         for phase in ['train', 'valid']:
             print(f"Epoch {epoch}, Phase {phase}")
+
             if phase == 'train':
                 model.train()
             else:
@@ -119,23 +121,11 @@ def train(model, train_loader, validation_loader, epochs, criterion, optimizer, 
                         100.0*accuracy,
                         time.asctime() # for measuring time for testing, remove for students and in the formatting
                     )
-                )
-
-                #NOTE: Comment lines below to train and test on whole dataset
-                if running_samples > (0.2 * len(image_dataset[phase].dataset)):
-                    break
-            
+                ) 
+                    
             epoch_loss = running_loss / running_samples
             epoch_acc = running_corrects / running_samples
-
-            if phase == 'valid':
-                if epoch_loss < best_loss:
-                    best_loss = epoch_loss
-                else:
-                    loss_counter += 1
-        
-        if loss_counter == 1:
-            break
+            print("Phase training, Epoch loss {:.3f}, Epoch accuracy {:.3f}".format(epoch_loss, 100*epoch_acc))
 
     return model
 
@@ -143,14 +133,20 @@ def net():
     '''
         Use RESNET50 pretrained model
     '''
-    model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
-    # Freeze Model Parameters. This means we don't need to
-    # update the pretrained parameters
-    for param in model.parameters():
-        param.requires_grad = False
-    num_features = model.fc.in_features
-    model.fc = nn.Sequential(nn.Linear(num_features, NUM_OUTPUT_LABELS))
+    model = models.resnet50(pretrained=True)
 
+    # Freeze training of the convolutional layers
+    for param in model.parameters():
+        param.requires_grad = False   
+
+    # Override the last layer to adjust it to our problem
+    num_features=model.fc.in_features
+    model.fc = nn.Sequential(
+        nn.Linear(num_features, 1024),
+        nn.ReLU(inplace=True),
+        nn.Linear(1024, NUM_OUTPUT_LABELS)
+    )
+    
     return model
 
 def create_data_loaders(data_path, batch_size):
@@ -165,6 +161,8 @@ def create_data_loaders(data_path, batch_size):
     return data_loader
 
 def save_model(model, output_path):
+    logger.info("Saving the model")
+    
     if not os.path.exists(output_path):
         os.makedirs(output_path)
     model_path = os.path.join(output_path, "resnet50"+".pth")
@@ -182,7 +180,7 @@ def get_args():
     parser.add_argument(
         "--epochs",
         type=int,
-        default=2,
+        default=14,
         metavar="N",
         help="number of epochs to train (default: 14)",
     )
@@ -190,9 +188,10 @@ def get_args():
         "--lr", type=float, default=1.0, metavar="LR", help="learning rate (default: 1.0)"
     )
 
-    parser.add_argument('--train', type=str, default=os.environ['SM_CHANNEL_TRAINING'])
-    parser.add_argument('--valid', type=str, default=os.environ['SM_CHANNEL_VALIDATION'])
-    parser.add_argument('--test', type=str, default=os.environ['SM_CHANNEL_TESTING'])
+    # Pass channel data as arguments (train, validation, test)
+    parser.add_argument('--train', type=str, default=os.environ['SM_CHANNEL_TRAINING'] if os.environ.get('SM_CHANNEL_TRAINING') != None else './dataset/dogImages/train')
+    parser.add_argument('--valid',  type=str, default=os.environ['SM_CHANNEL_VALIDATION'] if os.environ.get('SM_CHANNEL_VALIDATION') != None else './dataset/dogImages/valid')
+    parser.add_argument('--test', type=str, default=os.environ['SM_CHANNEL_TESTING'] if os.environ.get('SM_CHANNEL_TESTING') != None else './dataset/dogImages/test')
 
     args = parser.parse_args()
     return args
@@ -213,21 +212,29 @@ def main():
     loss_criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), args.lr)
 
+    # Determine if we should use the CUDA GPU
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Running on Device {device}")
-    model = train(model,
-                train_loader,
-                validation_loader,
-                args.epochs,
-                loss_criterion,
-                optimizer,
-                device=device)
+
+    model = train(
+        model,
+        train_loader,
+        validation_loader,
+        args.epochs,
+        loss_criterion,
+        optimizer,
+        device
+    )
 
     # Save the trained model
     save_model(model, MODEL_FOLDER_PATH)
 
     # Test the model to see its accuracy
-    test(model, test_loader, loss_criterion, device)
+    test(model, 
+         test_loader, 
+         loss_criterion, 
+         device
+    )
 
 
 if __name__=='__main__':
